@@ -31,11 +31,13 @@ function mysql_get_julia_type(mysqltype)
 
     elseif (mysqltype == MYSQL_TYPE_NULL ||
             mysqltype == MYSQL_TYPE_SET ||
-            mysqltype == MYSQL_TYPE_TINY_BLOB ||
+            mysqltype == MYSQL_TYPE_GEOMETRY)
+        return String
+
+    elseif (mysqltype == MYSQL_TYPE_TINY_BLOB ||
             mysqltype == MYSQL_TYPE_MEDIUM_BLOB ||
             mysqltype == MYSQL_TYPE_LONG_BLOB ||
-            mysqltype == MYSQL_TYPE_BLOB ||
-            mysqltype == MYSQL_TYPE_GEOMETRY)
+            mysqltype == MYSQL_TYPE_BLOB)
         return String
 
     elseif (mysqltype == MYSQL_TYPE_YEAR)
@@ -248,13 +250,13 @@ function mysql_result_to_dataframe(result)
     return df
 end
 
-mysql_binary_interpret_field(buf, mysqltype) =
-    mysql_binary_interpret_field(buf, mysql_get_ctype(mysqltype))
+mysql_binary_interpret_field(buf, mysqltype, len=nothing) =
+    mysql_binary_interpret_field(buf, mysql_get_ctype(mysqltype), len)
 
-mysql_binary_interpret_field(buf, ::Type{String}) =
-    unsafe_string(convert(Ptr{Cchar}, buf))
+mysql_binary_interpret_field(buf, ::Type{String}, len=nothing) =
+    unsafe_string(convert(Ptr{Cchar}, buf), len)
 
-function mysql_binary_interpret_field(buf, T::Type)
+function mysql_binary_interpret_field(buf, T::Type, len=nothing)
     value = unsafe_load(convert(Ptr{T}, buf), 1)
 
     if typeof(value) == MYSQL_TIME
@@ -285,7 +287,8 @@ function stmt_populate_row!(df, row_index, bindarr)
             continue
         end
         df[row_index, i] = mysql_binary_interpret_field(bindarr[i].buffer,
-                                                        convert(MYSQL_TYPE, bindarr[i].buffer_type))
+                                                        convert(MYSQL_TYPE, bindarr[i].buffer_type),
+                                                        bindarr[i].buffer_length)
     end
 end
 
@@ -367,8 +370,10 @@ function mysql_get_row_as_tuple(bindarr::Vector{MYSQL_BIND}, jtypes, isnullable)
         if bindarr[i].is_null_value != 0
             vec[i] = Nullable{jtypes[i]}()
         else
+            println("$i: Type: $(bindarr[i].buffer_type) Capacity: $(bindarr[i].buffer_length) Len: $(bindarr[i].length)")
             val = mysql_binary_interpret_field(bindarr[i].buffer,
-                                               convert(MYSQL_TYPE, bindarr[i].buffer_type))
+                                               convert(MYSQL_TYPE, bindarr[i].buffer_type),
+                                               bindarr[i].buffer_length)
             vec[i] = isnullable[i] ? Nullable(val) : val
         end
     end
